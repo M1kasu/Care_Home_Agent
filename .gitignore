@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime data and local model files
+smart_home_agent/data/*.gguf
+smart_home_agent/data/*.gguf.part
+smart_home_agent/data/*.db
+smart_home_agent/data/*.db-*
+*.sqlite
+*.sqlite3
+
+# Node / presentation build cache
+node_modules/
+pptx_work/node_modules/
+pptx_work/scratch/
+
+# Generated presentation outputs: keep only the final deck and source files.
+pptx_work/output/*
+!pptx_work/output/兴享智家_慧家中枢_复赛产品介绍_评分维度强化版.pptx
+!pptx_work/output/兴享智家_慧家中枢_复赛产品介绍_评分维度强化版_含演讲备注.pptx
+
+# Logs
+*.log
