@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "zte-smart-home-agent"
 version = "0.1.0"
@@ -12,6 +16,13 @@ dependencies = [
 demo = [
     "gradio>=4.0,<6",
 ]
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["smart_home_agent*"]
+exclude = ["demo*", "docs*", "pptx_work*", "scripts*", "tests*", "zhijia*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

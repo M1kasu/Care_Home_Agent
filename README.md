@@ -15,11 +15,14 @@
 
 ![系统架构](docs/assets/architecture.png)
 
-系统分为三层：
+系统在一个 Python 进程内分为四层：
 
 1. **交互层**：用户通过快捷场景或 Gradio Demo 输入自然语言，统一进入 `main.run`。
 2. **Agent 主链路**：`Pipeline -> Router -> 本地 Qwen -> Planner -> Executor -> ToolRegistry -> Reply Builder`，完成理解、规划、执行和回复。
-3. **本地能力层**：传感器、设备控制、场景联动、网络诊断、提醒管理、长期画像、知识库、安全确认、SQLite 和 State 全部在本地闭环。
+3. **内嵌 Home Runtime**：通过 Event Bus、State Machine、Service Registry、Scheduler、实体/设备/区域注册表统一承载家庭自动化能力，不启动单独的 Home Assistant 服务。
+4. **集成与本地能力层**：`SimulatorIntegration` 提供设备、传感器、场景、网络、提醒与能耗服务；长期画像、知识库、安全确认、SQLite 和 State 全部在本地闭环。
+
+Agent 工具只负责把白名单调用转发给 Home Runtime，不再保存一份重复的设备业务逻辑。传感器状态写入 State Machine 后会发出 `state_changed` 事件，由照护策略自动产生或解除告警；设备定时动作与提醒重试由 Runtime Scheduler 执行。详细设计见 [内嵌 Home Runtime 架构](docs/home-runtime-architecture.md)。
 
 ## Demo 功能截图
 
@@ -59,11 +62,19 @@
 main.py                         比赛要求的 run 入口
 smart_home_agent/               Agent 核心代码
   core/                         Router / Planner / Executor
-  tools/                        ToolRegistry 与家庭工具
+  tools/                        Agent ToolRegistry 与 Runtime 薄适配
+  home_runtime/                 单进程家庭自动化运行时
+    integrations/simulator.py   模拟设备、传感器、场景、提醒、能耗集成
+    event_bus.py                同步领域事件总线
+    state_machine.py            实体状态机与 state_changed 事件
+    service_registry.py         Runtime 服务白名单与调用日志
+    scheduler.py                状态化延迟任务调度
+    care_policy.py              事件驱动照护告警策略
   memory/                       SQLite 知识库、长期画像、会话记忆
   providers/                    本地 LLM 提供方
 demo/app.py                     Gradio 演示界面
 tests/test_scenarios.py         场景烟雾测试
+tests/test_home_runtime.py      Runtime、事件、调度契约测试
 zhijia/docs/                    需求、接口、实现方案文档
 pptx_work/                      复赛 PPT 生成脚本与最终 PPT
 docs/assets/                    README 展示图片
@@ -128,6 +139,7 @@ print(result["reply"])
 ```powershell
 $env:PYTHONIOENCODING="utf-8"
 python tests\test_scenarios.py
+python tests\test_home_runtime.py
 ```
 
 期望输出：
@@ -138,7 +150,8 @@ all scenario tests passed
 
 ## 当前边界
 
-- 当前设备、网络和传感器为本地模拟数据，方便比赛现场稳定演示。
-- `home_tools.py` 的模拟工具可以替换成 Matter、MQTT、Home Assistant、路由器 API 等真实接口。
+- 当前设备、网络和传感器由 `SimulatorIntegration` 提供，方便比赛现场稳定演示。
+- 后续 Matter、MQTT、精简 HA 能力或路由器 API 应新增为 Runtime Integration；Agent、Planner 与 UI 不需要复制设备业务代码。
+- Scheduler 已能持久化在返回 State 中并在每轮运行时处理到期任务；常驻后台时钟、跨进程数据库恢复和真实消息推送仍属于后续工程化工作。
 - 长期家庭画像和本地知识库保存在 SQLite 中，运行时数据库文件不会提交到 GitHub。
 - 本地模型为 CPU 推理，首次加载和生成速度取决于运行机器。

@@ -95,12 +95,9 @@ class TaskPlanner:
             ]
         if intent.name == "child_mode_apply":
             scene = slots.get("scene", "child_study")
-            steps = [
+            return [
                 PlanStep("s1", "scene.apply", {"scene": scene}, "应用儿童模式场景"),
             ]
-            if scene == "child_study":
-                steps.append(PlanStep("s2", "device.set_timer", {"device_id": "kids_room_light", "minutes": 45, "action": "set_brightness", "reason": "护眼休息"}, "学习 45 分钟后提醒护眼休息", ["s1"]))
-            return steps
         if intent.name == "energy_query":
             return [
                 PlanStep("s1", "energy.query", {"top_k": 5}, "查询家庭能耗排行"),

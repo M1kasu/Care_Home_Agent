@@ -9,6 +9,8 @@ from .core.executor import PlanExecutor
 from .core.models import Intent, ToolResult
 from .core.planner import TaskPlanner
 from .core.router import LocalRouter
+from .home_runtime import HomeRuntime
+from .home_runtime.integrations import SimulatorIntegration
 from .memory.family_profile import FamilyProfileMemory
 from .memory.session import SessionMemory
 from .memory.sqlite_store import SQLiteKnowledgeBase
@@ -19,7 +21,7 @@ from .tools.registry import ToolRegistry
 
 
 class SmartHomeAgent:
-    def __init__(self) -> None:
+    def __init__(self, integration_factories: tuple[Any, ...] | None = None) -> None:
         self.memory = SessionMemory(max_items=12)
         self.router = LocalRouter(self.memory)
         self.planner = TaskPlanner()
@@ -28,6 +30,7 @@ class SmartHomeAgent:
         self._profile_memory: FamilyProfileMemory | None = None
         self._sqlite_path: str | None = None
         self.executor = PlanExecutor(self.registry)
+        self._integration_factories = integration_factories if integration_factories is not None else (SimulatorIntegration,)
 
     def run(self, user_input: str, state: dict | None = None, config: dict | None = None) -> dict:
         total_start = time.perf_counter()
@@ -36,6 +39,10 @@ class SmartHomeAgent:
         working_state = ensure_home_state(state)
         if self._profile_memory is not None:
             self._profile_memory.apply_to_state(working_state)
+        runtime = HomeRuntime(working_state)
+        for integration_factory in self._integration_factories:
+            runtime.add_integration(integration_factory())
+        runtime.start()
         user_input = str(user_input or "").strip()
         if not user_input:
             user_input = "家里现在状态怎么样？"
@@ -48,7 +55,7 @@ class SmartHomeAgent:
             safety = {"need_confirmation": False, "message": ""}
         else:
             plan = self.planner.build(intent, working_state, cfg)
-            tool_results, safety = self.executor.execute(plan, {"state": working_state}, cfg)
+            tool_results, safety = self.executor.execute(plan, runtime.context, cfg)
             if intent.name == "confirmation_accept":
                 working_state["pending_confirmations"] = []
             reply = self._reply(intent, tool_results, safety, working_state)
@@ -58,6 +65,8 @@ class SmartHomeAgent:
             ):
                 reply, reply_metrics = self._llm_direct_reply(user_input, working_state, cfg)
                 nlu_metrics.update(reply_metrics)
+
+        runtime.tick()
 
         working_state["last_intent"] = intent.name
         working_state["last_slots"] = intent.slots
@@ -83,6 +92,8 @@ class SmartHomeAgent:
             "planning_latency_ms": max(1, total_latency_ms - nlu_metrics.get("nlu_latency_ms", 0) - tool_latency_ms),
             "tool_latency_ms": tool_latency_ms,
             "memory_mb": self._estimate_memory_mb(working_state),
+            "runtime_events": runtime.snapshot()["event_count"],
+            "runtime_pending_jobs": runtime.snapshot()["pending_jobs"],
         }
         return {
             "reply": reply,
@@ -92,6 +103,7 @@ class SmartHomeAgent:
             "state": working_state,
             "metrics": metrics,
             "safety": safety,
+            "runtime": runtime.snapshot(),
         }
 
     def _ensure_tools(self, config: dict[str, Any]) -> None:

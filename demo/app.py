@@ -357,4 +357,4 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     threading.Thread(target=_preload_local_model, daemon=True).start()
-    build_app().launch(server_name="127.0.0.1", server_port=7860, share=False, inbrowser=True)
+    build_app().launch(server_name="127.0.0.1", server_port=7860, share=False, inbrowser=False)
