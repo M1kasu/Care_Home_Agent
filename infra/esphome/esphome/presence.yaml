@@ -1,0 +1,19 @@
+esphome:
+  name: living-room-presence
+
+host:
+  mac_address: "02:00:00:00:00:13"
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+binary_sensor:
+  - platform: template
+    id: living_room_presence
+    name: "Living Room Presence"
+    device_class: occupancy
+    lambda: |-
+      return true;

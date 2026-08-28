@@ -2,11 +2,13 @@
 
 ## 目标与阶段状态
 
-当前实现完成前三个阶段：
+当前实现完成四个阶段：
 
 1. 在 Home Agent 进程内建立轻量 Runtime 内核，不启动单独的 Home Assistant。
 2. 把设备、场景、网络、提醒、传感器和能耗能力迁入 `SimulatorIntegration`。
 3. 用实体状态事件驱动照护告警，并用状态化 Scheduler 承载设备定时动作和提醒重试。
+4. 新增 `ESPHomeIntegration`，通过官方 `aioesphomeapi` 将本地 ESPHome Host 的
+   Light、Cover、Binary Sensor、Climate 和 Sensor 状态映射到 Runtime。
 
 本阶段没有复制 Home Assistant 源码。这样可以先稳定项目的领域边界；后续若引入 HA 代码，应以一个或多个 Integration 的形式接入，而不是让 Agent 直接依赖 HA 内部对象。
 
@@ -26,11 +28,14 @@ SmartHomeAgent Pipeline
           |                        |                         |
     ServiceRegistry          StateMachine               Scheduler
           |                        |                         |
-          v                        v                         v
- SimulatorIntegration         EventBus             延迟 Service 调用
-                                   |
-                                   v
-                            CarePolicyEngine
+          |                        v                         v
+          |                     EventBus              延迟 Service 调用
+          |                        |
+          |                        v
+          |                 CarePolicyEngine
+          |
+          +--> SimulatorIntegration
+          +--> ESPHomeIntegration --> aioesphomeapi --> ESPHome Host
 ```
 
 所有组件都在同一 Python 进程、同一份家庭 State 上工作。Agent 面向自然语言任务；Runtime 面向确定性的家庭服务、实体状态、事件和调度。
@@ -49,13 +54,14 @@ SmartHomeAgent Pipeline
 | `registries.py` | 管理实体、设备和区域元数据 | Runtime model |
 | `care_policy.py` | 监听传感器事件，维护照护告警生命周期 | Event Bus、家庭状态 |
 | `integrations/simulator.py` | 当前比赛业务实现和模拟数据 | Runtime 注册表、状态机、服务上下文 |
+| `integrations/esphome.py` | 维护加密 Native API 连接，规范化实体状态并覆盖真实设备服务 | `aioesphomeapi`、Runtime 注册表、状态机、服务上下文 |
 
 ## 耦合度与扩展边界
 
 - Runtime 核心不依赖 Router、Planner、LLM、Gradio、SQLite 画像或具体设备，属于低业务耦合。
 - Agent ToolRegistry 只依赖 `HomeRuntimeFacade.call_service`，不再直接调用模拟设备函数，耦合由“实现级”降为“服务契约级”。
 - `SimulatorIntegration` 内部仍聚合了比赛阶段的多个业务域，属于中等内聚、可接受的阶段性耦合；真实接入时可按 `matter`、`mqtt`、`network`、`care` 拆为多个 Integration。
-- `pipeline.py` 是明确的组合根，默认装配 `SimulatorIntegration`。构造 `SmartHomeAgent` 时可传入其他 Integration 工厂，不需要修改 Planner 和 UI。
+- `pipeline.py` 是明确的组合根，默认装配 `SimulatorIntegration`；`HOME_BACKEND=esphome` 时再装配真实集成并覆盖相关服务。构造 `SmartHomeAgent` 时也可传入 Integration 工厂，不需要修改 Planner 和 UI。
 - 照护策略只订阅实体事件，不依赖传感器采集协议；传感器从模拟器换成 Matter/MQTT 后，策略可以保持不变。
 
 ## 后续融合 Home Assistant 的方式
@@ -71,5 +77,6 @@ SmartHomeAgent Pipeline
 
 - Scheduler 在每次 `run` 和 Runtime `tick` 时执行到期任务，还不是独立后台线程。
 - Runtime 状态随返回的 State 跨轮延续；SQLite 持久化、崩溃恢复和幂等迁移尚未实现。
-- 模拟传感器可通过 `sensor.update` Service 注入变化；真实协议适配器尚未接入。
+- `HOME_BACKEND=esphome` 时，客厅灯、窗帘、存在传感器和空调使用真实 ESPHome
+  Native API；其他比赛设备与网络、提醒、能耗能力仍由模拟集成提供。
 - 告警当前保存在 State 并产生事件，短信、电话、App Push 等通知通道尚未接入。

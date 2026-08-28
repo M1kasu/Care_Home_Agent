@@ -1,0 +1,32 @@
+esphome:
+  name: living-room-curtain
+  on_boot:
+    priority: -100
+    then:
+      - delay: 1s
+      - cover.open: living_room_curtain
+
+host:
+  mac_address: "02:00:00:00:00:12"
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+cover:
+  - platform: time_based
+    id: living_room_curtain
+    name: "Living Room Curtain"
+    open_action:
+      - lambda: |-
+          ESP_LOGI("virtual_curtain", "Motor: OPEN");
+    open_duration: 10s
+    close_action:
+      - lambda: |-
+          ESP_LOGI("virtual_curtain", "Motor: CLOSE");
+    close_duration: 10s
+    stop_action:
+      - lambda: |-
+          ESP_LOGI("virtual_curtain", "Motor: STOP");

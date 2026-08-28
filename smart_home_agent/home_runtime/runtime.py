@@ -17,7 +17,7 @@ from .state_machine import StateMachine
 class HomeRuntimeFacade:
     """Narrow API exposed to Agent tools and application services."""
 
-    def __init__(self, runtime: "HomeRuntime") -> None:
+    def __init__(self, runtime: HomeRuntime) -> None:
         self._runtime = runtime
 
     @property
@@ -27,6 +27,22 @@ class HomeRuntimeFacade:
     @property
     def state_machine(self) -> StateMachine:
         return self._runtime.states
+
+    @property
+    def states(self) -> StateMachine:
+        return self._runtime.states
+
+    @property
+    def entities(self) -> EntityRegistry:
+        return self._runtime.entities
+
+    @property
+    def devices(self) -> DeviceRegistry:
+        return self._runtime.devices
+
+    @property
+    def areas(self) -> AreaRegistry:
+        return self._runtime.areas
 
     @property
     def scheduler(self) -> Scheduler:

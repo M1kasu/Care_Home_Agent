@@ -24,14 +24,19 @@ class ServiceRegistry:
         *,
         side_effect: str = "read",
         integration: str = "core",
+        replace: bool = False,
     ) -> None:
-        if name in self._handlers:
+        if name in self._handlers and not replace:
             raise ValueError(f"service already registered: {name}")
         self._handlers[name] = handler
         self._metadata[name] = {"name": name, "side_effect": side_effect, "integration": integration}
 
     def has(self, name: str) -> bool:
         return name in self._handlers
+
+    def handler(self, name: str) -> ServiceHandler | None:
+        """Return a registered handler so an overlay integration can delegate."""
+        return self._handlers.get(name)
 
     def list_services(self) -> list[dict[str, Any]]:
         return [dict(item) for item in self._metadata.values()]

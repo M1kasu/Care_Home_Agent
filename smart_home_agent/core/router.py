@@ -178,7 +178,7 @@ class LocalRouter:
             return Intent("network_diagnose", 0.91, slots, reasoning="命中家庭网络诊断关键词")
         if _has_any(text, ["睡前", "离家", "回家", "观影", "学习"]) and _has_any(text, ["模式", "切", "准备", "帮我"]):
             return Intent("scene_mode_apply", 0.93, slots, reasoning="命中场景模式关键词")
-        if _has_any(text, ["灯", "空调", "电视", "门锁", "摄像头"]) and _has_any(text, ["打开", "关", "关闭", "调", "锁", "解锁"]):
+        if _has_any(text, ["灯", "空调", "窗帘", "电视", "门锁", "摄像头"]) and _has_any(text, ["打开", "关", "关闭", "调", "锁", "解锁", "停止"]):
             return Intent("device_control", 0.9, slots, reasoning="命中设备控制关键词")
         if _is_home_knowledge_question(text):
             return Intent("knowledge_query", 0.86, slots, reasoning="命中本地知识问答关键词")
@@ -226,7 +226,7 @@ class LocalRouter:
                 break
         if _has_any(text, ["孩子睡", "儿童睡", "哄孩子"]):
             slots["scene"] = "child_sleep"
-        device_map = {"灯": "灯", "空调": "空调", "电视": "电视", "门锁": "门锁", "锁": "门锁", "摄像头": "摄像头"}
+        device_map = {"灯": "灯", "空调": "空调", "窗帘": "窗帘", "电视": "电视", "门锁": "门锁", "锁": "门锁", "摄像头": "摄像头"}
         for word, device in device_map.items():
             if word in text:
                 slots["device"] = device
@@ -271,6 +271,8 @@ class LocalRouter:
             return "set_temperature", int(temperature.group(1))
         if "睡眠模式" in text:
             return "set_mode", "sleep"
+        if "停止" in text:
+            return "stop", None
         if _has_any(text, ["关闭", "关掉", "关上", "关"]):
             return "turn_off", None
         if _has_any(text, ["打开", "开启", "开"]):

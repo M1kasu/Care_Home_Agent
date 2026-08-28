@@ -7,7 +7,6 @@ from typing import Any
 
 from ..models import AreaRecord, DeviceRecord, EntityRecord
 
-
 DEFAULT_HOME_STATE: dict[str, Any] = {
     "family": {
         "members": {
@@ -139,6 +138,7 @@ class SimulatorIntegration:
             runtime.areas.register(AreaRecord(area_id=room, name=room))
 
         for device_id, info in state.get("devices", {}).items():
+            info.setdefault("source", "simulator")
             domain = _device_domain(info.get("type"))
             entity_id = f"{domain}.{device_id}"
             runtime.devices.register(
@@ -161,6 +161,15 @@ class SimulatorIntegration:
             runtime.states.set(entity_id, _device_primary_state(info), _device_attributes(device_id, info), emit=False)
 
         for room, sensor in state.get("sensors", {}).items():
+            sensor.setdefault(
+                "sources",
+                {
+                    "temperature": "simulator",
+                    "humidity": "simulator",
+                    "motion": "simulator",
+                    "noise_db": "simulator",
+                },
+            )
             entity_id = _sensor_entity_id(room)
             runtime.entities.register(
                 EntityRecord(entity_id=entity_id, domain="sensor", name=f"{room}环境传感器", area_id=room)

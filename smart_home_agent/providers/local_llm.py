@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+import atexit
 import json
+import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-
-_CLIENT_CACHE: dict[tuple[Any, ...], "LocalLLMClient"] = {}
-_CLIENT_CACHE_LOCK = threading.Lock()
+LOGGER = logging.getLogger(__name__)
 
 
 class LocalLLMClient:
@@ -92,7 +92,7 @@ class LocalLLMClient:
             return None
         try:
             result = model.create_embedding(texts)
-        except Exception:
+        except Exception:  # noqa: BLE001 - optional native embedding boundary
             return None
         data = result.get("data") if isinstance(result, dict) else None
         if not data:
@@ -129,7 +129,7 @@ class LocalLLMClient:
                 from llama_cpp import Llama
 
                 self._library_version = getattr(llama_cpp, "__version__", "")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - optional native dependency
                 self._load_failed = True
                 self._load_error = f"{type(exc).__name__}: {exc}"
                 return None
@@ -141,7 +141,7 @@ class LocalLLMClient:
                     n_gpu_layers=0,
                     verbose=False,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - native model load boundary
                 self._load_failed = True
                 self._load_error = f"{type(exc).__name__}: {exc}"
                 return None
@@ -164,7 +164,7 @@ class LocalLLMClient:
             if not choices:
                 return None
             return choices[0].get("text", "").strip()
-        except Exception:
+        except Exception:  # noqa: BLE001 - optional native inference boundary
             return None
 
     def status(self, *, load: bool = False) -> dict[str, Any]:
@@ -180,6 +180,16 @@ class LocalLLMClient:
             "library_version": self._library_version,
         }
 
+    def close(self) -> None:
+        """Release llama.cpp resources before Python tears down native modules."""
+        with self._lock:
+            model, self._model = self._model, None
+        if model is not None:
+            try:
+                model.close()
+            except Exception as exc:
+                LOGGER.debug("Failed to close local LLM cleanly", exc_info=exc)
+
 
 def _parse_json_object(text: str) -> dict[str, Any] | None:
     start = text.find("{")
@@ -191,6 +201,10 @@ def _parse_json_object(text: str) -> dict[str, Any] | None:
         return parsed if isinstance(parsed, dict) else None
     except (json.JSONDecodeError, ValueError):
         return None
+
+
+_CLIENT_CACHE: dict[tuple[Any, ...], LocalLLMClient] = {}
+_CLIENT_CACHE_LOCK = threading.Lock()
 
 
 def get_cached_local_llm_client(config: dict[str, Any]) -> LocalLLMClient:
@@ -213,3 +227,14 @@ def get_cached_local_llm_client(config: dict[str, Any]) -> LocalLLMClient:
             )
             _CLIENT_CACHE[key] = client
         return client
+
+
+def close_cached_local_llm_clients() -> None:
+    with _CLIENT_CACHE_LOCK:
+        clients = list(_CLIENT_CACHE.values())
+        _CLIENT_CACHE.clear()
+    for client in clients:
+        client.close()
+
+
+atexit.register(close_cached_local_llm_clients)

@@ -1,0 +1,48 @@
+services:
+  light-node:
+    image: ${ESPHOME_IMAGE:-ghcr.io/esphome/esphome:2026.8.1}
+    container_name: light-node
+    restart: unless-stopped
+    init: true
+    command: ["run", "/config/light.yaml"]
+    volumes:
+      - ./esphome:/config
+      - ./cache:/cache
+    ports:
+      - "6053:6053"
+
+  curtain-node:
+    image: ${ESPHOME_IMAGE:-ghcr.io/esphome/esphome:2026.8.1}
+    container_name: curtain-node
+    restart: unless-stopped
+    init: true
+    command: ["run", "/config/curtain.yaml"]
+    volumes:
+      - ./esphome:/config
+      - ./cache:/cache
+    ports:
+      - "6054:6053"
+
+  presence-node:
+    image: ${ESPHOME_IMAGE:-ghcr.io/esphome/esphome:2026.8.1}
+    container_name: presence-node
+    restart: unless-stopped
+    init: true
+    command: ["run", "/config/presence.yaml"]
+    volumes:
+      - ./esphome:/config
+      - ./cache:/cache
+    ports:
+      - "6056:6053"
+
+  ac-node:
+    image: ${ESPHOME_IMAGE:-ghcr.io/esphome/esphome:2026.8.1}
+    container_name: ac-node
+    restart: unless-stopped
+    init: true
+    command: ["run", "/config/ac.yaml"]
+    volumes:
+      - ./esphome:/config
+      - ./cache:/cache
+    ports:
+      - "6055:6053"

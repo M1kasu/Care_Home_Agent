@@ -1,0 +1,5 @@
+cache/
+.env
+.esphome/
+esphome/.esphome/
+esphome/secrets.yaml
