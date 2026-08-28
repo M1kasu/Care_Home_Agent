@@ -7,7 +7,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-MODEL_DIR = Path(__file__).resolve().parent.parent / "algorithm" / "smart_home_agent" / "data"
+MODEL_DIR = Path(__file__).resolve().parent.parent / "smart_home_agent" / "data"
 MODEL_FILE = MODEL_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf"
 
 # Qwen2.5-1.5B-Instruct Q4_K_M from bartowski on HuggingFace

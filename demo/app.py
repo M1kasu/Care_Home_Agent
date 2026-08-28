@@ -13,17 +13,37 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import sys
 import threading
 from pathlib import Path
 
+
+def _bypass_proxy_for_localhost() -> None:
+    """Keep Gradio's startup self-check away from system/Conda proxies."""
+    required = ("127.0.0.1", "localhost", "::1")
+    for variable in ("NO_PROXY", "no_proxy"):
+        entries = [
+            item.strip()
+            for item in os.environ.get(variable, "").split(",")
+            if item.strip()
+        ]
+        for host in required:
+            if host not in entries:
+                entries.append(host)
+        os.environ[variable] = ",".join(entries)
+
+
+_bypass_proxy_for_localhost()
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from main import run  # noqa: E402
-from smart_home_agent.memory.family_profile import FamilyProfileMemory  # noqa: E402
-from smart_home_agent.providers.local_llm import get_cached_local_llm_client  # noqa: E402
-from smart_home_agent.settings import DEFAULT_CONFIG  # noqa: E402
+from main import run
+from smart_home_agent.memory.family_profile import FamilyProfileMemory
+from smart_home_agent.providers.local_llm import get_cached_local_llm_client
+from smart_home_agent.settings import DEFAULT_CONFIG
 
 try:
     import gradio as gr
@@ -31,6 +51,8 @@ except ImportError as exc:  # pragma: no cover - 仅在缺依赖时
     raise SystemExit(
         "未检测到 gradio，请先执行: pip install gradio>=4.0"
     ) from exc
+
+LOGGER = logging.getLogger(__name__)
 
 
 SHORTCUTS = [
@@ -65,11 +87,17 @@ def _device_summary(state: dict) -> list[list[str]]:
             detail_parts.append(f"{info['temperature']}℃")
         if "mode" in info:
             detail_parts.append(f"模式 {info['mode']}")
+        if "position" in info:
+            detail_parts.append(f"位置 {info['position']}%")
+        if "occupied" in info:
+            detail_parts.append("有人" if info["occupied"] else "无人")
+        source = "ESPHome 真实" if info.get("source") == "esphome" else "模拟"
         rows.append([
             info.get("room", "-"),
             info.get("name", did),
             status_icon,
             ", ".join(detail_parts) or "-",
+            source,
         ])
     return rows
 
@@ -77,12 +105,19 @@ def _device_summary(state: dict) -> list[list[str]]:
 def _sensor_summary(state: dict) -> list[list[str]]:
     rows = []
     for room, s in state.get("sensors", {}).items():
+        sources = s.get("sources", {})
+        source = (
+            "混合：温度/活动=ESPHome，湿度/噪声=模拟"
+            if sources.get("temperature") == "esphome"
+            else "模拟"
+        )
         rows.append([
             room,
             f"{s.get('temperature')}℃",
             f"{s.get('humidity')}%",
             "有人" if s.get("motion") else f"{s.get('last_motion_min', 0)} 分钟无活动",
             f"{s.get('noise_db')} dB",
+            source,
         ])
     return rows
 
@@ -93,7 +128,7 @@ def _energy_summary(state: dict) -> str:
     threshold = energy.get("threshold_kwh", 0)
     cost = round(daily * energy.get("price_per_kwh", 0), 2)
     badge = "⚠️ 已超阈值" if daily > threshold else "✅ 正常"
-    return f"今日能耗 **{daily} kWh** ｜ 预计电费 **¥{cost}** ｜ 阈值 {threshold} kWh ｜ {badge}"
+    return f"模拟能耗 **{daily} kWh** ｜ 预计电费 **¥{cost}** ｜ 阈值 {threshold} kWh ｜ {badge}"
 
 
 def _profile_summary(state: dict) -> str:
@@ -251,8 +286,8 @@ def _load_persistent_profiles(state: dict) -> dict:
 def _preload_local_model() -> None:
     try:
         get_cached_local_llm_client(DEFAULT_CONFIG).status(load=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        LOGGER.debug("Local model preload failed", exc_info=exc)
 
 
 def build_app() -> gr.Blocks:
@@ -269,7 +304,12 @@ def build_app() -> gr.Blocks:
 
         with gr.Row():
             with gr.Column(scale=5):
-                chatbot = gr.Chatbot(label="对话窗口", type="messages", height=420)
+                chatbot = gr.Chatbot(
+                    label="对话窗口",
+                    type="messages",
+                    height=420,
+                    allow_tags=False,
+                )
                 with gr.Row():
                     user_box = gr.Textbox(
                         placeholder="例如：帮老人那屋弄得舒服一点 / 一键巡检 / 切睡前模式",
@@ -301,15 +341,15 @@ def build_app() -> gr.Blocks:
                     tool_md = gr.Markdown("_无工具日志。_")
                 with gr.Accordion("💡 设备状态面板", open=True):
                     devices_table = gr.Dataframe(
-                        headers=["房间", "设备", "状态", "详情"],
-                        datatype=["str", "str", "str", "str"],
+                        headers=["房间", "设备", "状态", "详情", "来源"],
+                        datatype=["str", "str", "str", "str", "str"],
                         interactive=False,
                         label="设备",
                     )
                 with gr.Accordion("🌡 传感器面板", open=False):
                     sensors_table = gr.Dataframe(
-                        headers=["房间", "温度", "湿度", "活动", "噪声"],
-                        datatype=["str", "str", "str", "str", "str"],
+                        headers=["房间", "温度", "湿度", "活动", "噪声", "来源"],
+                        datatype=["str", "str", "str", "str", "str", "str"],
                         interactive=False,
                         label="传感器",
                     )
@@ -357,4 +397,9 @@ def build_app() -> gr.Blocks:
 
 if __name__ == "__main__":
     threading.Thread(target=_preload_local_model, daemon=True).start()
-    build_app().launch(server_name="127.0.0.1", server_port=7860, share=False, inbrowser=True)
+    build_app().launch(
+        server_name="127.0.0.1",
+        server_port=7860,
+        share=False,
+        inbrowser=False,
+    )

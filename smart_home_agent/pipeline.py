@@ -9,6 +9,8 @@ from .core.executor import PlanExecutor
 from .core.models import Intent, ToolResult
 from .core.planner import TaskPlanner
 from .core.router import LocalRouter
+from .home_runtime import HomeRuntime
+from .home_runtime.integrations import ESPHomeIntegration, SimulatorIntegration
 from .memory.family_profile import FamilyProfileMemory
 from .memory.session import SessionMemory
 from .memory.sqlite_store import SQLiteKnowledgeBase
@@ -19,7 +21,7 @@ from .tools.registry import ToolRegistry
 
 
 class SmartHomeAgent:
-    def __init__(self) -> None:
+    def __init__(self, integration_factories: tuple[Any, ...] | None = None) -> None:
         self.memory = SessionMemory(max_items=12)
         self.router = LocalRouter(self.memory)
         self.planner = TaskPlanner()
@@ -28,6 +30,7 @@ class SmartHomeAgent:
         self._profile_memory: FamilyProfileMemory | None = None
         self._sqlite_path: str | None = None
         self.executor = PlanExecutor(self.registry)
+        self._integration_factories = integration_factories
 
     def run(self, user_input: str, state: dict | None = None, config: dict | None = None) -> dict:
         total_start = time.perf_counter()
@@ -36,6 +39,15 @@ class SmartHomeAgent:
         working_state = ensure_home_state(state)
         if self._profile_memory is not None:
             self._profile_memory.apply_to_state(working_state)
+        runtime = HomeRuntime(working_state)
+        if self._integration_factories is not None:
+            for integration_factory in self._integration_factories:
+                runtime.add_integration(integration_factory())
+        else:
+            runtime.add_integration(SimulatorIntegration())
+            if str(cfg.get("home_backend", "simulator")).lower() == "esphome":
+                runtime.add_integration(ESPHomeIntegration.from_config(cfg))
+        runtime.start()
         user_input = str(user_input or "").strip()
         if not user_input:
             user_input = "家里现在状态怎么样？"
@@ -48,7 +60,7 @@ class SmartHomeAgent:
             safety = {"need_confirmation": False, "message": ""}
         else:
             plan = self.planner.build(intent, working_state, cfg)
-            tool_results, safety = self.executor.execute(plan, {"state": working_state}, cfg)
+            tool_results, safety = self.executor.execute(plan, runtime.context, cfg)
             if intent.name == "confirmation_accept":
                 working_state["pending_confirmations"] = []
             reply = self._reply(intent, tool_results, safety, working_state)
@@ -58,6 +70,8 @@ class SmartHomeAgent:
             ):
                 reply, reply_metrics = self._llm_direct_reply(user_input, working_state, cfg)
                 nlu_metrics.update(reply_metrics)
+
+        runtime.tick()
 
         working_state["last_intent"] = intent.name
         working_state["last_slots"] = intent.slots
@@ -83,6 +97,8 @@ class SmartHomeAgent:
             "planning_latency_ms": max(1, total_latency_ms - nlu_metrics.get("nlu_latency_ms", 0) - tool_latency_ms),
             "tool_latency_ms": tool_latency_ms,
             "memory_mb": self._estimate_memory_mb(working_state),
+            "runtime_events": runtime.snapshot()["event_count"],
+            "runtime_pending_jobs": runtime.snapshot()["pending_jobs"],
         }
         return {
             "reply": reply,
@@ -92,6 +108,7 @@ class SmartHomeAgent:
             "state": working_state,
             "metrics": metrics,
             "safety": safety,
+            "runtime": runtime.snapshot(),
         }
 
     def _ensure_tools(self, config: dict[str, Any]) -> None:
@@ -128,9 +145,7 @@ class SmartHomeAgent:
             result = _find_result(tool_results, "knowledge.search")
             hits = result.data.get("hits", []) if result else []
             return not hits
-        if intent.name != "unknown" and not plan:
-            return True
-        return False
+        return bool(intent.name != "unknown" and not plan)
 
     def _llm_direct_reply(
         self,
@@ -320,15 +335,23 @@ class SmartHomeAgent:
                 device_result = _find_result(tool_results, "device.query")
                 devices = device_result.data.get("devices", {}) if device_result else {}
                 on_devices = [info.get("name") for info in devices.values() if info.get("power") == "on"]
-                device_text = f"开启中的设备包括：{'、'.join(on_devices)}" if on_devices else "当前没有开启中的模拟设备"
+                device_text = f"开启中的设备包括：{'、'.join(on_devices)}" if on_devices else "当前没有开启中的设备"
+                source_note = ""
+                if sensor.get("sources", {}).get("temperature") == "esphome":
+                    source_note = "（温度和活动来自 ESPHome，湿度为模拟数据）"
                 return (
                     f"{room} 当前温度 {sensor.get('temperature')}℃，湿度 {sensor.get('humidity')}%，"
-                    f"{activity}；{device_text}。"
+                    f"{activity}{source_note}；{device_text}。"
                 )
             device_result = _find_result(tool_results, "device.query")
             devices = device_result.data.get("devices", {}) if device_result else state.get("devices", {})
             on_devices = [info.get("name") for info in devices.values() if info.get("power") == "on"]
-            return f"当前家中共有 {len(devices)} 个模拟设备，开启中的设备包括：{'、'.join(on_devices[:6]) or '暂无'}。"
+            real_count = sum(1 for info in devices.values() if info.get("source") == "esphome")
+            simulated_count = len(devices) - real_count
+            return (
+                f"当前家中共有 {len(devices)} 个设备，其中 {real_count} 个 ESPHome 真实设备、"
+                f"{simulated_count} 个模拟设备；开启中的设备包括：{'、'.join(on_devices[:6]) or '暂无'}。"
+            )
         if intent.name == "child_mode_apply":
             scene_result = _find_result(tool_results, "scene.apply")
             timer_result = _find_result(tool_results, "device.set_timer")

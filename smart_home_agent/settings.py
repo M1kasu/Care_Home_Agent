@@ -7,11 +7,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-
 PACKAGE_DIR = Path(__file__).resolve().parent
 DATA_DIR = PACKAGE_DIR / "data"
 
 DEFAULT_CONFIG: dict[str, Any] = {
+    "home_backend": os.getenv("HOME_BACKEND", "simulator"),
+    "esphome_host": os.getenv("ESPHOME_HOST", "192.168.111.134"),
+    "esphome_noise_psk": os.getenv("ESPHOME_NOISE_PSK", ""),
+    "esphome_connect_timeout": float(os.getenv("ESPHOME_CONNECT_TIMEOUT", "12")),
+    "esphome_command_timeout": float(os.getenv("ESPHOME_COMMAND_TIMEOUT", "5")),
+    "esphome_strict_connect": os.getenv("ESPHOME_STRICT_CONNECT", "true").lower() not in {"0", "false", "no"},
     "mode": "hybrid",
     "enable_local_llm": True,
     "model_path": os.getenv("LOCAL_LLM_MODEL_PATH", str(DATA_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf")),

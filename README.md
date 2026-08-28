@@ -15,11 +15,14 @@
 
 ![系统架构](docs/assets/architecture.png)
 
-系统分为三层：
+系统在一个 Python 进程内分为四层：
 
 1. **交互层**：用户通过快捷场景或 Gradio Demo 输入自然语言，统一进入 `main.run`。
 2. **Agent 主链路**：`Pipeline -> Router -> 本地 Qwen -> Planner -> Executor -> ToolRegistry -> Reply Builder`，完成理解、规划、执行和回复。
-3. **本地能力层**：传感器、设备控制、场景联动、网络诊断、提醒管理、长期画像、知识库、安全确认、SQLite 和 State 全部在本地闭环。
+3. **内嵌 Home Runtime**：通过 Event Bus、State Machine、Service Registry、Scheduler、实体/设备/区域注册表统一承载家庭自动化能力，不启动单独的 Home Assistant 服务。
+4. **集成与本地能力层**：`SimulatorIntegration` 提供完整演示能力；启用 `ESPHomeIntegration` 后，四个客厅节点由真实 Native API 状态与控制覆盖。长期画像、知识库、安全确认、SQLite 和 State 全部在本地闭环。
+
+Agent 工具只负责把白名单调用转发给 Home Runtime，不再保存一份重复的设备业务逻辑。传感器状态写入 State Machine 后会发出 `state_changed` 事件，由照护策略自动产生或解除告警；设备定时动作与提醒重试由 Runtime Scheduler 执行。详细设计见 [内嵌 Home Runtime 架构](docs/home-runtime-architecture.md)。
 
 ## Demo 功能截图
 
@@ -59,11 +62,22 @@
 main.py                         比赛要求的 run 入口
 smart_home_agent/               Agent 核心代码
   core/                         Router / Planner / Executor
-  tools/                        ToolRegistry 与家庭工具
+  tools/                        Agent ToolRegistry 与 Runtime 薄适配
+  home_runtime/                 单进程家庭自动化运行时
+    integrations/simulator.py   模拟设备、传感器、场景、提醒、能耗集成
+    integrations/esphome.py     ESPHome Native API 持久连接与状态映射
+    event_bus.py                同步领域事件总线
+    state_machine.py            实体状态机与 state_changed 事件
+    service_registry.py         Runtime 服务白名单与调用日志
+    scheduler.py                状态化延迟任务调度
+    care_policy.py              事件驱动照护告警策略
   memory/                       SQLite 知识库、长期画像、会话记忆
   providers/                    本地 LLM 提供方
 demo/app.py                     Gradio 演示界面
 tests/test_scenarios.py         场景烟雾测试
+tests/test_home_runtime.py      Runtime、事件、调度契约测试
+tests/test_esphome_integration.py ESPHome 服务覆盖与自然语言链路测试
+infra/esphome/                  四节点 Docker 配置与完整复现手册
 zhijia/docs/                    需求、接口、实现方案文档
 pptx_work/                      复赛 PPT 生成脚本与最终 PPT
 docs/assets/                    README 展示图片
@@ -73,11 +87,18 @@ qa.md                           答辩问答库
 
 ## 安装
 
-建议使用 Python 3.10+。
+建议使用 Python 3.11+。ESPHome 真实接入固定使用与 Home Assistant 2026.8 相同的
+`aioesphomeapi 45.6.1`，该版本不支持 Python 3.10。
 
 ```powershell
-python -m pip install -e ".[demo]"
-python -m pip install "llama-cpp-python==0.3.19" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu --prefer-binary
+# 首次准备（已有环境时跳过创建）
+conda create -n CareHomeAgent python=3.11 pip -y
+conda activate CareHomeAgent
+
+# 当前开发机也可直接激活固定路径
+# & E:\Anaconda\envs\CareHomeAgent\Scripts\Activate.ps1
+python --version
+python -m pip install -e ".[demo,test]" --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu --prefer-binary
 ```
 
 ## 本地模型
@@ -108,6 +129,16 @@ python demo\app.py
 http://127.0.0.1:7860/
 ```
 
+## ESPHome 数字设备联调
+
+仓库包含一套可复现的 ESPHome Host 四节点环境（灯、窗帘、人体存在传感器和空调），
+以及 Docker、本地 VMware/LAN、Native API 和状态回读测试步骤。参见
+[ESPHome Host 数字设备环境与联调手册](infra/esphome/README.md)。
+
+默认仍使用 `SimulatorIntegration`；设置 `HOME_BACKEND=esphome` 后，项目会额外加载
+`ESPHomeIntegration`，以官方 `aioesphomeapi` 持久连接四个本地 ESPHome Host 节点，
+并用真实设备查询、控制和场景服务覆盖模拟服务。
+
 ## 命令行调用
 
 ```powershell
@@ -128,6 +159,8 @@ print(result["reply"])
 ```powershell
 $env:PYTHONIOENCODING="utf-8"
 python tests\test_scenarios.py
+python tests\test_home_runtime.py
+python -m pytest tests\test_esphome_integration.py tests\test_home_runtime.py -q
 ```
 
 期望输出：
@@ -138,7 +171,8 @@ all scenario tests passed
 
 ## 当前边界
 
-- 当前设备、网络和传感器为本地模拟数据，方便比赛现场稳定演示。
-- `home_tools.py` 的模拟工具可以替换成 Matter、MQTT、Home Assistant、路由器 API 等真实接口。
+- 默认由 `SimulatorIntegration` 提供完整演示能力；`HOME_BACKEND=esphome` 时，客厅灯、窗帘、存在传感器、空调和温度改用真实 ESPHome，其余能力保留模拟实现。
+- 后续 Matter、MQTT、精简 HA 能力或路由器 API 应新增为 Runtime Integration；Agent、Planner 与 UI 不需要复制设备业务代码。
+- Scheduler 已能持久化在返回 State 中并在每轮运行时处理到期任务；常驻后台时钟、跨进程数据库恢复和真实消息推送仍属于后续工程化工作。
 - 长期家庭画像和本地知识库保存在 SQLite 中，运行时数据库文件不会提交到 GitHub。
 - 本地模型为 CPU 推理，首次加载和生成速度取决于运行机器。

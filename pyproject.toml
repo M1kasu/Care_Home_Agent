@@ -1,9 +1,14 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "zte-smart-home-agent"
 version = "0.1.0"
 description = "端侧智能家居 Agent 比赛版 Demo"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
+    "aioesphomeapi==45.6.1",
     "llama-cpp-python==0.3.19",
     "numpy<2.3",
 ]
@@ -12,6 +17,16 @@ dependencies = [
 demo = [
     "gradio>=4.0,<6",
 ]
+test = [
+    "pytest>=8,<10",
+]
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["smart_home_agent*"]
+exclude = ["demo*", "docs*", "pptx_work*", "scripts*", "tests*", "zhijia*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
